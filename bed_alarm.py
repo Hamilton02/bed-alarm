@@ -11,9 +11,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import ssl
 import sys
 from pathlib import Path
 
+import aiohttp
+import certifi
 from asyncsleepiq import AsyncSleepIQ
 
 HERE = Path(__file__).resolve().parent
@@ -42,7 +45,10 @@ def pick_sleeper(api: AsyncSleepIQ, who: str):
 
 
 async def run(command: str) -> None:
-    api = AsyncSleepIQ()
+    # python.org's macOS Python ships without root certs; bring certifi's bundle.
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context))
+    api = AsyncSleepIQ(client_session=session)
     try:
         await api.login(os.environ["SLEEPIQ_EMAIL"], os.environ["SLEEPIQ_PASSWORD"])
         await api.init_beds()
