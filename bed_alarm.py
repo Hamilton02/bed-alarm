@@ -41,14 +41,15 @@ def pick_sleeper(api: AsyncSleepIQ, who: str):
             if who in (sleeper.name.lower(), sleeper.side.value.lower(), sleeper.side_full.lower()):
                 return sleeper
     names = [f"{s.name} ({s.side_full})" for b in api.beds.values() for s in b.sleepers]
-    sys.exit(f"No sleeper matches {who!r}. Found: {', '.join(names) or 'none'}")
+    raise LookupError(f"No sleeper matches {who!r}. Found: {', '.join(names) or 'none'}")
 
 
-async def run(command: str) -> None:
+async def run(command: str) -> str:
     # python.org's macOS Python ships without root certs; bring certifi's bundle.
     ssl_context = ssl.create_default_context(cafile=certifi.where())
     session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context))
     api = AsyncSleepIQ(client_session=session)
+    lines: list[str] = []
     try:
         await api.login(os.environ["SLEEPIQ_EMAIL"], os.environ["SLEEPIQ_PASSWORD"])
         await api.init_beds()
@@ -56,12 +57,12 @@ async def run(command: str) -> None:
 
         if command == "status":
             for bed in api.beds.values():
-                print(f"{bed.name} ({bed.model})")
+                lines.append(f"{bed.name} ({bed.model})")
                 for s in bed.sleepers:
                     await s.fetch_favsleepnumber()
-                    print(f"  {s.side_full}: {s.name or '-'}  in_bed={s.in_bed}  "
+                    lines.append(f"  {s.side_full}: {s.name or '-'}  in_bed={s.in_bed}  "
                           f"sleep_number={s.sleep_number}  favorite={s.fav_sleep_number}")
-            return
+            return "\n".join(lines)
 
         sleeper = pick_sleeper(api, os.environ.get("SLEEPER", "L"))
         if command == "wake":
@@ -70,7 +71,7 @@ async def run(command: str) -> None:
             await sleeper.fetch_favsleepnumber()
             target = sleeper.fav_sleep_number
         await sleeper.set_sleepnumber(target)
-        print(f"{sleeper.name} ({sleeper.side_full}): {sleeper.sleep_number} -> {target}")
+        return f"{sleeper.name} ({sleeper.side_full}): {sleeper.sleep_number} -> {target}"
     finally:
         await api.close_session()
 
@@ -82,7 +83,10 @@ def main() -> None:
     load_env()
     if not os.environ.get("SLEEPIQ_EMAIL") or not os.environ.get("SLEEPIQ_PASSWORD"):
         sys.exit("Set SLEEPIQ_EMAIL and SLEEPIQ_PASSWORD in .env")
-    asyncio.run(run(args.command))
+    try:
+        print(asyncio.run(run(args.command)))
+    except LookupError as e:
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":
